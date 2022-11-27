@@ -1,10 +1,18 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <iostream>
 #include <ctime>
 #include <chrono>
 #include <fstream>
 #include <assert.h>
+#include <asm/unistd.h>
+#include <linux/perf_event.h>
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <inttypes.h>
 
 using namespace std;
 
@@ -13,6 +21,23 @@ using namespace std;
 
 #include "single_thread.h"
 #include "multi_thread.h"
+
+struct perf_entry{
+    struct perf_event_attr pea;
+    long long count;
+    int fd;
+};
+
+static long
+perf_event_open(struct perf_event_attr *hw_event, pid_t pid,
+                int cpu, int group_fd, unsigned long flags)
+{
+    int ret;
+
+    ret = syscall(__NR_perf_event_open, hw_event, pid, cpu,
+                    group_fd, flags);
+    return ret;
+}
 
 // Used to cross-check answer. DO NOT MODIFY!
 void reference(int N, int *matA, int *matB, int *output)
@@ -41,10 +66,13 @@ void reference(int N, int *matA, int *matB, int *output)
 
 int main(int argc, char *argv[])
 {
+  int m=5;
+  struct perf_entry pArr[5];
+
   // Input size of square matrices
   ofstream output_file; 
   string OUTPUT_FILE_NAME = "TimeTaken.txt";  
-  output_file.open(OUTPUT_FILE_NAME); 
+  output_file.open(OUTPUT_FILE_NAME, ios::app); 
   
 
   int N;
@@ -58,8 +86,57 @@ int main(int argc, char *argv[])
   input_file >> N;
   cout << "Input matrix of size " << N << "\n";
 
-  output_file<<N<<'\n';
+  output_file<<"Size:"<<N<<'\n';
 
+  for(int i=0; i<m; i++){
+      memset(&pArr[i].pea, 0, sizeof(struct perf_event_attr));     
+  }
+
+  pArr[0].pea.type = PERF_TYPE_HW_CACHE;
+  pArr[1].pea.type = PERF_TYPE_HW_CACHE;
+  pArr[2].pea.type = PERF_TYPE_HW_CACHE;
+  pArr[3].pea.type = PERF_TYPE_HW_CACHE;
+  pArr[4].pea.type = PERF_TYPE_SOFTWARE;
+
+  
+  for(int i=0; i<m; i++){
+      pArr[i].pea.size = sizeof(struct perf_event_attr);
+  }
+
+  pArr[0].pea.config = PERF_COUNT_HW_CACHE_L1D |
+              PERF_COUNT_HW_CACHE_OP_READ << 8 |
+              PERF_COUNT_HW_CACHE_RESULT_MISS << 16;
+      
+  pArr[1].pea.config = PERF_COUNT_HW_CACHE_LL |
+              PERF_COUNT_HW_CACHE_OP_READ << 8 |
+              PERF_COUNT_HW_CACHE_RESULT_MISS << 16;
+  
+  pArr[2].pea.config = PERF_COUNT_HW_CACHE_LL |
+              PERF_COUNT_HW_CACHE_OP_WRITE << 8 |
+              PERF_COUNT_HW_CACHE_RESULT_MISS << 16;
+
+  pArr[3].pea.config = PERF_COUNT_HW_CACHE_DTLB |
+              PERF_COUNT_HW_CACHE_OP_READ << 8 |
+              PERF_COUNT_HW_CACHE_RESULT_MISS << 16;
+  
+  pArr[4].pea.config = PERF_COUNT_SW_PAGE_FAULTS ;
+
+
+
+  for(int i=0; i<m; i++){
+      pArr[i].pea.disabled = 1;
+      pArr[i].pea.exclude_kernel = 1;
+      pArr[i].pea.exclude_hv = 1;
+
+      pArr[i].fd = perf_event_open(&pArr[i].pea, 0, -1, -1, 0);
+
+      if (pArr[i].fd == -1) {
+          fprintf(stderr, "%d, Error opening leader %llx\n", i, pArr[i].pea.config);
+          exit(EXIT_FAILURE);
+      }
+  }
+
+    
   // Input matrix A
   int *matA = new int[N * N];
   for(int i = 0; i < N; ++i)
@@ -77,11 +154,36 @@ int main(int argc, char *argv[])
   reference(N, matA, matB, output_reference);
 
   // Execute reference program
+  output_file<<"Reference:";
   auto begin = TIME_NOW;
-  reference(N, matA, matB, output_reference);
+
+  for(int i=0; i<m; i++){
+      ioctl(pArr[i].fd, PERF_EVENT_IOC_RESET, 0);
+      ioctl(pArr[i].fd, PERF_EVENT_IOC_ENABLE, 0);
+  }
+
+  reference(N, matA, matB, output_reference); 
+  
+  for(int i=0; i<m; i++){
+      ioctl(pArr[i].fd, PERF_EVENT_IOC_DISABLE, 0);
+      read(pArr[i].fd, &pArr[i].count, sizeof(long long));          
+  }
+
   auto end = TIME_NOW;
-  cout << "Reference execution time: " << 
+  cout << "Time:" << 
     (double)TIME_DIFF(std::chrono::microseconds, begin, end) / 1000.0 << " ms\n";    
+  cout<<"L1 Read misses:"<<pArr[0].count<<'\n';
+  cout<<"LL Read misses:"<<pArr[1].count<<'\n';
+  cout<<"LL Write misses:"<<pArr[2].count<<'\n';
+  cout<<"TLB misses:"<<pArr[3].count<<'\n';
+  cout<<"Page Faults:"<<pArr[4].count<<'\n';
+
+  output_file<<(double)TIME_DIFF(std::chrono::microseconds, begin, end) / 1000.0 << "\t";
+  output_file<<pArr[0].count<<'\t';
+  output_file<<pArr[1].count<<'\t';
+  output_file<<pArr[2].count<<'\t';
+  output_file<<pArr[3].count<<'\t';
+  output_file<<pArr[4].count<<'\n';
 
   /* if(N<=8){ */
   // cerr << "matA: " << endl;
@@ -108,16 +210,39 @@ int main(int argc, char *argv[])
   /* } */
 
   // Execute single thread
-output_file<<"single Thread:";
+  output_file<<"Single-Thread:";
 
   int *output_single = new int[(N>>1)*(N>>1)];
   begin = TIME_NOW;
-  singleThread(N, matA, matB, output_single);
-  end = TIME_NOW;
-  cout << "Single thread execution time: " << 
-    (double)TIME_DIFF(std::chrono::microseconds, begin, end) / 1000.0 << " ms\n";
 
-  output_file<<(double)TIME_DIFF(std::chrono::microseconds, begin, end) / 1000.0 << " ms\n";
+  for(int i=0; i<m; i++){
+      ioctl(pArr[i].fd, PERF_EVENT_IOC_RESET, 0);
+      ioctl(pArr[i].fd, PERF_EVENT_IOC_ENABLE, 0);
+  }
+
+  singleThread(N, matA, matB, output_single);
+
+  for(int i=0; i<m; i++){
+      ioctl(pArr[i].fd, PERF_EVENT_IOC_DISABLE, 0);
+      read(pArr[i].fd, &pArr[i].count, sizeof(long long));          
+  }
+
+  end = TIME_NOW;
+  cout << "Time:" << 
+    (double)TIME_DIFF(std::chrono::microseconds, begin, end) / 1000.0 << " ms\n";    
+  cout<<"L1 Read misses:"<<pArr[0].count<<'\n';
+  cout<<"LL Read misses:"<<pArr[1].count<<'\n';
+  cout<<"LL Write misses:"<<pArr[2].count<<'\n';
+  cout<<"TLB misses:"<<pArr[3].count<<'\n';
+  cout<<"Page Faults:"<<pArr[4].count<<'\n';
+
+  output_file<<(double)TIME_DIFF(std::chrono::microseconds, begin, end) / 1000.0 << "\t";
+  output_file<<pArr[0].count<<'\t';
+  output_file<<pArr[1].count<<'\t';
+  output_file<<pArr[2].count<<'\t';
+  output_file<<pArr[3].count<<'\t';
+  output_file<<pArr[4].count<<'\n';
+
 
   for(int i = 0; i < ((N>>1)*(N>>1)); ++i)
     if(output_single[i] != output_reference[i]) {
@@ -126,18 +251,56 @@ output_file<<"single Thread:";
     }
 
   // Execute multi-thread
-  // int *output_multi = new int[(N>>1)*(N>>1)];
-  // begin = TIME_NOW;
-  // multiThread(N, matA, matB, output_multi);
-  // end = TIME_NOW;
-  // cout << "Multi-threaded execution time: " << 
-  //   (double)TIME_DIFF(std::chrono::microseconds, begin, end) / 1000.0 << " ms\n";
+  output_file<<"Multi-Thread:";
 
-  // for(int i = 0; i < ((N>>1)*(N>>1)); ++i)
-  //   if(output_multi[i] != output_reference[i]) {
-  //     cout << "Mismatch at " << i << "\n";
-  //     exit(0);
-  //   }
+  int *output_multi = new int[(N>>1)*(N>>1)];
+  begin = TIME_NOW;
+
+  for(int i=0; i<m; i++){
+      ioctl(pArr[i].fd, PERF_EVENT_IOC_RESET, 0);
+      ioctl(pArr[i].fd, PERF_EVENT_IOC_ENABLE, 0);
+  }
+
+  multiThread(N, matA, matB, output_multi);
+
+  for(int i=0; i<m; i++){
+      ioctl(pArr[i].fd, PERF_EVENT_IOC_DISABLE, 0);
+      read(pArr[i].fd, &pArr[i].count, sizeof(long long));    
+      close(pArr[i].fd);
+  }
+
+
+  end = TIME_NOW;
+  cout << "Time:" << 
+    (double)TIME_DIFF(std::chrono::microseconds, begin, end) / 1000.0 << " ms\n";    
+  cout<<"L1 Read misses:"<<pArr[0].count<<'\n';
+  cout<<"LL Read misses:"<<pArr[1].count<<'\n';
+  cout<<"LL Write misses:"<<pArr[2].count<<'\n';
+  cout<<"TLB misses:"<<pArr[3].count<<'\n';
+  cout<<"Page Faults:"<<pArr[4].count<<'\n';
+
+  output_file<<(double)TIME_DIFF(std::chrono::microseconds, begin, end) / 1000.0 << "\t";
+  output_file<<pArr[0].count<<'\t';
+  output_file<<pArr[1].count<<'\t';
+  output_file<<pArr[2].count<<'\t';
+  output_file<<pArr[3].count<<'\t';
+  output_file<<pArr[4].count<<'\n';
+
+
+// cerr << "output_multi: " << endl;
+// for(int i=0; i<(N>>1); i++){
+//   for(int j=0; j<(N>>1); j++){
+//     cerr << output_multi[i*(N>>1)+j] << "\t";
+//   }
+//   cerr << endl;
+// }
+  
+
+  for(int i = 0; i < ((N>>1)*(N>>1)); ++i)
+    if(output_multi[i] != output_reference[i]) {
+      cout << "Mismatch at " << i << "\n";
+      exit(0);
+    }
 
   input_file.close(); 
   output_file.close(); 
