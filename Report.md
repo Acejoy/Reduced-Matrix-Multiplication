@@ -197,4 +197,4 @@ Since there are limited number of cores in CPU,, so we are moving to GPU.As GPU 
 
 ## Conclusion
 For PartA, We observed the performance improvement due to AVX Instructions and reasoned about it .We also saw the usefulness of multi-threaded program and how it affects the execution time.So we can conclude that exploiting data parallelism and instruction parallelism gives us significant performance gain.
-For PartB , as GPU contains a huge no of cores which can process a lot of data , thus the throughput is considerably higher, although for lower data sizes, it performs worse as the bottleneck of copying data from CPU to GPU becomes significant percentage of the entire program., hence the worse performance.
+For PartB , as GPU contains a huge no of cores which can process a lot of data , thus the throughput is considerably higher, although for lower data sizes, it performs worse as the bottleneck of copying data from CPU to GPU becomes significant percentage of the entire program., hence the worse performances.
