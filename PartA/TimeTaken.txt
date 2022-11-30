@@ -1,0 +1,4 @@
+Size:16
+Reference:0.142	38	0	0	0	0
+Single-Thread:0.108	37	0	0	0	0
+Multi-Thread:137.267	1271	113	44	90	8
