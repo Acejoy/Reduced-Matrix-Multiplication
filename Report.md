@@ -13,7 +13,36 @@ The link for the github repository: [Reduced Matrix Multiplication](https://gith
 
 In this part of the assignment, we are supposed to implement single threaded and multi-threaded Reduced Matrix Multiplication(RMM) . Naive implementation is given for reference.Improving the performance of the operation can be achieved using many ways. In the previous assignment , we explored improvement by using blocked matrix multiplication and loop interchange.We observed significanr improvement using those techniques. In this assigment we use vector instructions to exploit data parallelism. We make a avx vector if 256 bits/4 integers and do the addition and multiplication operations with the corresponding vectors of the other matrix.We also use loop interchange to utilise locality of reference.We observe significant improvement over naive implementation of RMM.The reason for the improvement is using data parallelism, SIMD instructions, where a single instruction is fetched and decoded but executed on multiple elements.In multi-threaded implementation we use 8 threads . Each thread is responsible for calculating RMM for (N/8) number of rows of resultant matrix where N is the size of resultant matrix.
 
-The code was run on CLServ.
+Bottleneck: In single threaded we can't exploit much higher parallelism as one thread may be blocked or waiting for cache, so we move on to multi-threading in which multiple threads can be work on different parts of the matrix, which will result in higher in performance.
+
+The code was run on CLSERV server .The specs of the machine are as follows:
+
+```
+Architecture:        x86_64
+CPU op-mode(s):      32-bit, 64-bit
+Byte Order:          Little Endian
+CPU(s):              32
+On-line CPU(s) list: 0-31
+Thread(s) per core:  2
+Core(s) per socket:  8
+Socket(s):           2
+NUMA node(s):        2
+Vendor ID:           GenuineIntel
+CPU family:          6
+Model:               63
+Model name:          Intel(R) Xeon(R) CPU E5-2640 v3 @ 2.60GHz
+Stepping:            2
+CPU MHz:             1199.219
+CPU max MHz:         3400.0000
+CPU min MHz:         1200.0000
+BogoMIPS:            5194.02
+Virtualization:      VT-x
+L1d cache:           32K
+L1i cache:           32K
+L2 cache:            256K
+L3 cache:            20480K
+
+```
 
 <br>
 <br>
@@ -96,8 +125,26 @@ Implementation:-
 2. Multiplication function computes the matrix multiplication on the GPU
 3. We are computing by considering different cases i.e by taking different ThreadBlock sizes and and no of ThreadBlocks.
 4. In GPU the hierarchy is that there is a grid which contains no of ThreadBlocks and and each ThreadBlock contains multiple no of threads. ThreadBlocks run in Parallel on each SM( Simultaneous Multiprocessor).
-5. Here we are taking one grid having 2 dimensions x and y each dimension contains no of thread blocks. We are taking dimension of grid by dividing the output matrix size with threadblock size.
-6.  Each time we are taking ThreadBlock of different sizes (16,32,1024,etc).
+5. Here we are taking one grid having 2 dimensions x and y each dimension contains no of thread blocks. We are taking dimension of grid by dividing the output matrix size with threadblock size. Each thread will compute each element of output matrix.
+6. Each time we are taking ThreadBlock of different sizes (16,32,1024,etc).
+
+The code was run on NVidia 3050. the specs are as below:
+```
+Device 0: "NVIDIA GeForce RTX 3050 Laptop GPU"
+  CUDA Driver Version / Runtime Version          12.0 / 11.8
+  CUDA Capability Major/Minor version number:    8.6
+  Total amount of global memory:                 4096 MBytes (4294443008 bytes)
+  (016) Multiprocessors, (128) CUDA Cores/MP:    2048 CUDA Cores
+  GPU Max Clock rate:                            1500 MHz (1.50 GHz)
+  Memory Clock rate:                             5871 Mhz
+  Memory Bus Width:                              128-bit
+  Warp size:                                     32
+  Maximum number of threads per multiprocessor:  1536
+  Maximum number of threads per block:           1024
+  Max dimension size of a thread block (x,y,z): (1024, 1024, 64)
+  Max dimension size of a grid size    (x,y,z): (2147483647, 65535, 65535)
+    
+```
 
 <br>
 <br>
@@ -143,9 +190,11 @@ Table for maximum Speedup achieved for each matrix size.
 4. We can see that with small blocksize we are not using the SM (Simultaneous Multiprocessor.  with full capacity.
 5. We can also see that with large blocksize  we are not using enough SM  i.e we are not using enough parallelism.
 6. To get the best possible execution time there needs to be good balance between the no of Threadsblocks and size of the thread block.
+7. We cannot see much difference in the execution time with less matrix size. For less matrix size most of the time is taken by memory allocation and transfering of data on GPU device, as we increase the matrix size we can clearly see the difference in execution time and speedUp.
 
-<br>
-<br>
+BottleNeck:- 
+Since there are limited number of cores in CPU,, so we are moving to GPU.As GPU can have maximum ThreadBlock size of 1024 threads so for matrix size greater than that we need to increase no. of blocks.
 
-
-
+## Conclusion
+For PartA, We observed the performance improvement due to AVX Instructions and reasoned about it .We also saw the usefulness of multi-threaded program and how it affects the execution time.So we can conclude that exploiting data parallelism and instruction parallelism gives us significant performance gain.
+For PartB , as GPU contains a huge no of cores which can process a lot of data , thus the throughput is considerably higher, although for lower data sizes, it performs worse as the bottleneck of copying data from CPU to GPU becomes significant percentage of the entire program., hence the worse performance.
